@@ -2,8 +2,12 @@ import 'package:final_year_project_test/screens/login_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import 'firebase_options.dart';
+import 'services/firebase_options.dart';
+import 'providers/user_provider.dart';
+import 'screens/splash_screen.dart';
+import 'utils/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,12 +41,17 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home:Login_screen(),
-
-      // Responsive_layout(mobileScreenLayout: Mobile_screen_layout(),
-      // webScreenLayout: web_screen_layout(),),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => UserProvider()),
+      ],
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: ThemeMode.system, 
+        home: const SplashScreen(),
+      ),
     );
   }
 }

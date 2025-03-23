@@ -1,5 +1,12 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../Widgets/text_field_input.dart';
+import '../utils/app_dimensions.dart';
+import '../utils/app_typography.dart';
+import 'Dashboard.dart';
+import 'Register_screen.dart';
+import '../services/auth_service.dart';
+import '../utils/app_colors.dart';
 
 class Login_screen extends StatefulWidget {
   const Login_screen({super.key});
@@ -12,6 +19,8 @@ class _Login_screenState extends State<Login_screen> {
   final emailController = TextEditingController();
   final passController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  final AuthService _authService = AuthService();
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -29,10 +38,10 @@ class _Login_screenState extends State<Login_screen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(
-                height: 64,
+              SizedBox(
+                height: AppDimensions.paddingXXL,
               ),
-              const Text("Login Screen", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              Text("Welcome Back", style: AppTypography.h3),
               const SizedBox(
                 height: 64,
               ),
@@ -41,7 +50,7 @@ class _Login_screenState extends State<Login_screen> {
                 child: Column(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: EdgeInsets.all(AppDimensions.paddingM),
                       child: TextFieldInput(
                         textEditingController: emailController,
                         hintText: "Enter your email",
@@ -58,7 +67,7 @@ class _Login_screenState extends State<Login_screen> {
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: EdgeInsets.all(AppDimensions.paddingM),
                       child: TextFieldInput(
                         textEditingController: passController,
                         hintText: "Enter your password",
@@ -76,25 +85,95 @@ class _Login_screenState extends State<Login_screen> {
                       ),
                     ),
                     ElevatedButton(
-                      onPressed: () {
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                      ),
+                      onPressed: () async {
                         if (_formKey.currentState!.validate()) {
-                          // Form is valid, proceed with login
-                          final email = emailController.text;
-                          final password = passController.text;
-                          print('Valid login attempt - Email: $email, Password: $password');
-                          // Add your authentication logic here
-                        } else {
-                          // Form is invalid, show a message
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please fix the errors in the form')),
-                          );
+                          setState(() {
+                            _isLoading = true;
+                          });
+                          
+                          try {
+                            await _authService.signInWithEmailAndPassword(
+                              email: emailController.text,
+                              password: passController.text,
+                            );
+                            
+                            if (context.mounted) {
+                              Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(builder: (context) => const Dashboard()),
+                              );
+                            }
+                          } catch (error) {
+                            if (error is FirebaseAuthException) {
+                              if (error.code == 'user-not-found') {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('No user found for that email.')),
+                                );
+                              } else if (error.code == 'wrong-password') {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Wrong password provided for that user.')),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('An error occurred: ${error.message}')),
+                                );
+                              }
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('An unexpected error occurred: $error')),
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(() {
+                                _isLoading = false;
+                              });
+                            }
+                          }
                         }
                       },
-                      child: const Text('Login'),
-                    )
+                      child: _isLoading 
+                        ? SizedBox(
+                            width: 20, 
+                            height: 20, 
+                            child: CircularProgressIndicator(
+                              color: AppColors.primary,
+                              strokeWidth: 2,
+                            )
+                          )
+                        : Text('Login', style: TextStyle(fontSize: 16, color: AppColors.primary)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        // Add your forgot password logic here
+                      },
+                      child: Text('Forgot Password?', style: AppTypography.bodyMedium),
+                    ),
+                    Container(
+                      padding: EdgeInsets.all(AppDimensions.paddingM),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('Don\'t have an account?', style: AppTypography.bodyMedium),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                              );
+                              // Add your sign up logic here
+                            },
+                            child: Text('Register', style: TextStyle(fontSize: 16, color: AppColors.primary)),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              )
+              ),
             ],
           ),
         ),
