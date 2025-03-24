@@ -2,11 +2,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_data_model.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ApiService _apiService = ApiService();
+  final NotificationService _notificationService = NotificationService();
 
   // Get current user
   User? get currentUser => _auth.currentUser;
@@ -103,6 +105,9 @@ class AuthService {
           
           // Delete user document from Firestore
           await _firestore.collection('users').doc(user.uid).delete();
+          
+          // Show notification before deleting the Firebase Auth user
+          await _notificationService.showAccountDeletionNotification();
           
           // Delete Firebase Auth user
           await user.delete();

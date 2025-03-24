@@ -6,6 +6,7 @@ import 'Edit_screen/edit_profile_screen.dart';
 import '../screens/login_screen.dart';
 import '../services/auth_service.dart';
 import '../utils/app_colors.dart';
+import '../services/notification_service.dart';
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -16,6 +17,7 @@ class Dashboard extends StatefulWidget {
 
 class _DashboardState extends State<Dashboard> {
   final AuthService _authService = AuthService();
+  final NotificationService _notificationService = NotificationService();
   int _currentIndex = 0;
 
   void _showDeleteAccountConfirmation(BuildContext context) {
@@ -24,7 +26,7 @@ class _DashboardState extends State<Dashboard> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Delete Account'),
-          content: const Text('Are you sure you want to delete your account?'),
+          content: const Text('Are you sure you want to delete your account? This action cannot be undone.'),
           actions: [
             TextButton(
               onPressed: () {
@@ -34,15 +36,61 @@ class _DashboardState extends State<Dashboard> {
             ),
             TextButton(
               onPressed: () async {
-                await _authService.deleteAccount();
-                if (context.mounted) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (context) => const Login_screen()),
+                try {
+                  Navigator.of(context).pop(); // Close dialog first
+                  
+                  // Show loading indicator
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (BuildContext context) {
+                      return const Center(
+                        child: CircularProgressIndicator(),
+                      );
+                    },
                   );
+                  
+                  // Delete account
+                  await _authService.deleteAccount();
+                  
+                  // Show notification 
+                  await _notificationService.showAccountDeletionNotification();
+                  
+                  if (context.mounted) {
+                    // Remove loading indicator
+                    Navigator.of(context).pop();
+                    
+                    // Navigate to login screen
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (context) => const Login_screen()),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    // Remove loading indicator if still showing
+                    Navigator.of(context).pop();
+                    
+                    // Show error dialog
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext context) {
+                        return AlertDialog(
+                          title: const Text('Error'),
+                          content: Text('Failed to delete account: ${e.toString()}'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  }
                 }
               },
-              child: const Text('Delete'),
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
             ),
           ],
         );
