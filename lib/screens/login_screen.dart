@@ -7,6 +7,11 @@ import 'Dashboard.dart';
 import 'Register_screen.dart';
 import '../services/auth_service.dart';
 import '../utils/app_colors.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
+import 'forgot_password-screen.dart';
 
 class Login_screen extends StatefulWidget {
   const Login_screen({super.key});
@@ -20,13 +25,189 @@ class _Login_screenState extends State<Login_screen> {
   final passController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final AuthService _authService = AuthService();
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
   bool _isLoading = false;
+  bool _obscurePassword = true;
+  String _errorMessage = '';
 
   @override
   void dispose() {
     super.dispose();
     emailController.dispose();
     passController.dispose();
+  }
+
+  // Email/Password Login
+  Future<void> _signInWithEmailAndPassword() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+    
+    try {
+      final userCredential = await _authService.signInWithEmailAndPassword(
+        email: emailController.text,
+        password: passController.text,
+      );
+      
+      if (userCredential.user != null) {
+        if (context.mounted) {
+          // Update user provider with new user data
+          await Provider.of<UserProvider>(context, listen: false).fetchUserData();
+          
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const Dashboard()),
+          );
+        }
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _errorMessage = _getFirebaseErrorMessage(e.code);
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'An unexpected error occurred. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // Google Sign-In
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+    
+    try {
+      // Start the Google sign-in flow
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        // User canceled the sign-in flow
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      // Get authentication details
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      
+      // Create credential
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      
+      // Sign in with Firebase
+      final userCredential = await _authService.signInWithCredential(credential);
+      
+      if (userCredential.user != null) {
+        if (context.mounted) {
+          // Update user provider after successful login
+          await Provider.of<UserProvider>(context, listen: false).fetchUserData();
+          
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const Dashboard()),
+          );
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Google sign-in failed. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // Apple Sign-In
+  Future<void> _signInWithApple() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+    
+    try {
+      // Request Apple Sign-In credentials
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+      
+      // Create OAuthCredential
+      final oauthCredential = OAuthProvider('apple.com').credential(
+        idToken: appleCredential.identityToken,
+        accessToken: appleCredential.authorizationCode,
+      );
+      
+      // Sign in with Firebase
+      final userCredential = await _authService.signInWithCredential(oauthCredential);
+      
+      if (userCredential.user != null) {
+        // Update user display name if it's null and we have first/last name
+        if (userCredential.user!.displayName == null && 
+            (appleCredential.givenName != null || appleCredential.familyName != null)) {
+          await userCredential.user!.updateDisplayName(
+            [appleCredential.givenName, appleCredential.familyName]
+                .where((name) => name != null)
+                .join(' ')
+          );
+        }
+        
+        if (context.mounted) {
+          await Provider.of<UserProvider>(context, listen: false).fetchUserData();
+          
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const Dashboard()),
+          );
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Apple sign-in failed. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  String _getFirebaseErrorMessage(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return 'No user found with this email.';
+      case 'wrong-password':
+        return 'Incorrect password.';
+      case 'invalid-email':
+        return 'The email address is invalid.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'too-many-requests':
+        return 'Too many sign-in attempts. Please try again later.';
+      default:
+        return 'Authentication failed. Please try again.';
+    }
   }
 
   @override
@@ -88,53 +269,7 @@ class _Login_screenState extends State<Login_screen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                       ),
-                      onPressed: () async {
-                        if (_formKey.currentState!.validate()) {
-                          setState(() {
-                            _isLoading = true;
-                          });
-                          
-                          try {
-                            await _authService.signInWithEmailAndPassword(
-                              email: emailController.text,
-                              password: passController.text,
-                            );
-                            
-                            if (context.mounted) {
-                              Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute(builder: (context) => const Dashboard()),
-                              );
-                            }
-                          } catch (error) {
-                            if (error is FirebaseAuthException) {
-                              if (error.code == 'user-not-found') {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('No user found for that email.')),
-                                );
-                              } else if (error.code == 'wrong-password') {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Wrong password provided for that user.')),
-                                );
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('An error occurred: ${error.message}')),
-                                );
-                              }
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('An unexpected error occurred: $error')),
-                              );
-                            }
-                          } finally {
-                            if (mounted) {
-                              setState(() {
-                                _isLoading = false;
-                              });
-                            }
-                          }
-                        }
-                      },
+                      onPressed: _isLoading ? null : _signInWithEmailAndPassword,
                       child: _isLoading 
                         ? SizedBox(
                             width: 20, 
@@ -148,7 +283,10 @@ class _Login_screenState extends State<Login_screen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        // Add your forgot password logic here
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()),
+                        );
                       },
                       child: Text('Forgot Password?', style: AppTypography.bodyMedium),
                     ),
@@ -164,13 +302,66 @@ class _Login_screenState extends State<Login_screen> {
                                 context,
                                 MaterialPageRoute(builder: (context) => const RegisterScreen()),
                               );
-                              // Add your sign up logic here
                             },
                             child: Text('Register', style: TextStyle(fontSize: 16, color: AppColors.primary)),
                           ),
                         ],
                       ),
                     ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Google sign-in
+                        ElevatedButton.icon(
+                          onPressed: _isLoading ? null : _signInWithGoogle,
+                          icon: Image.asset(
+                            'assets/images/google_logo.png', // Make sure to add this to your assets
+                            height: 24,
+                          ),
+                          label: Text('Google'),
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                            backgroundColor: Colors.white,
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: Colors.grey[300]!),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        
+                        // Apple sign-in (iOS only)
+                        ElevatedButton.icon(
+                          onPressed: _isLoading ? null : _signInWithApple,
+                          icon: Icon(Icons.apple, color: Colors.white),
+                          label: Text('Apple'),
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.black,
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_errorMessage.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Text(
+                          _errorMessage,
+                          style: TextStyle(color: Colors.red[700]),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                   ],
                 ),
               ),

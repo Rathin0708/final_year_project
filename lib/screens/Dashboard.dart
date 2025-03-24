@@ -1,3 +1,4 @@
+import 'package:final_year_project_test/screens/profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
@@ -17,6 +18,38 @@ class _DashboardState extends State<Dashboard> {
   final AuthService _authService = AuthService();
   int _currentIndex = 0;
 
+  void _showDeleteAccountConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete Account'),
+          content: const Text('Are you sure you want to delete your account?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await _authService.deleteAccount();
+                if (context.mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (context) => const Login_screen()),
+                  );
+                }
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -35,7 +68,7 @@ class _DashboardState extends State<Dashboard> {
             title: const Text('User Dashboard'),
             backgroundColor: AppColors.primary,
           ),
-          drawer: Drawer(
+          endDrawer: Drawer(
             child: Column(
               children: [
                 UserAccountsDrawerHeader(
@@ -90,7 +123,7 @@ class _DashboardState extends State<Dashboard> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const EditProfileScreen(),
+                        builder: (context) => const ProfileScreen(),
                       ),
                     ).then((result) {
                       // Refresh user data if edit was successful
@@ -116,7 +149,6 @@ class _DashboardState extends State<Dashboard> {
                   leading: const Icon(Icons.settings, color: AppColors.primary),
                   title: const Text('Settings'),
                   onTap: () {
-                    // Navigate to settings
                   },
                 ),
                 const Spacer(),
@@ -131,6 +163,13 @@ class _DashboardState extends State<Dashboard> {
                         MaterialPageRoute(builder: (context) => const Login_screen()),
                       );
                     }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_forever, color: Colors.red),
+                  title: const Text('Delete Account', style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    _showDeleteAccountConfirmation(context);
                   },
                 ),
                 const SizedBox(height: 20),

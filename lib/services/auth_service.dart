@@ -69,9 +69,48 @@ class AuthService {
     }
   }
 
+  // Sign in with credential (for Google, Apple signin)
+  Future<UserCredential> signInWithCredential(AuthCredential credential) async {
+    try {
+      return await _auth.signInWithCredential(credential);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Sign out
   Future<void> signOut() async {
     await _auth.signOut();
+  }
+
+  // Delete user account from Firebase and API
+  Future<void> deleteAccount() async {
+    try {
+      User? user = _auth.currentUser;
+      
+      if (user != null) {
+        // Get API user ID from Firestore
+        DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
+        
+        if (userDoc.exists) {
+          Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
+          String apiUserId = userData['apiUserId'] ?? '';
+          
+          // Delete user from API if ID exists
+          if (apiUserId.isNotEmpty) {
+            await _apiService.deleteUser(apiUserId);
+          }
+          
+          // Delete user document from Firestore
+          await _firestore.collection('users').doc(user.uid).delete();
+          
+          // Delete Firebase Auth user
+          await user.delete();
+        }
+      }
+    } catch (e) {
+      rethrow;
+    }
   }
 
   // Update user profile (in both Firebase and API)
