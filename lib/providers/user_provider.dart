@@ -1,117 +1,196 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/user_data_model.dart';
+import 'dart:async';
+import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/user_status_service.dart';
 
 class UserProvider with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  
-  bool _isLoading = false;
+  final AuthService _authService = AuthService();
+  final NotificationService _notificationService = NotificationService();
+  final UserStatusService _statusService = UserStatusService();
+
+  bool _isLoading = true;
   String _username = '';
   String _email = '';
-  String _userId = '';
-  UserDataModel? _userData;
+  String? _photoUrl;
+  Map<String, dynamic> _userData = {};
+  StreamSubscription<DocumentSnapshot>? _userDataSubscription;
   
+  // Getters
+  bool get isLoading => _isLoading;
+  String get username => _username;
+  String get email => _email;
+  String? get photoUrl => _photoUrl;
+  Map<String, dynamic> get userData => _userData;
+  String get phoneNumber => _userData['phoneNo'] ?? '';
+  String get location => _userData['Location'] ?? '';
+  String get bio => _userData['bio'] ?? '';
+  bool get isOnline => _userData['isOnline'] ?? false;
+  DateTime? get lastSeen {
+    if (_userData['lastSeen'] != null) {
+      return (_userData['lastSeen'] as Timestamp).toDate();
+    }
+    return null;
+  }
+
+  // Constructor that listens to auth state changes
   UserProvider() {
-    // Listen for auth state changes
     _auth.authStateChanges().listen((User? user) {
-      if (user == null) {
-        // User is signed out
-        _clearUserData();
-        notifyListeners();
+      if (user != null) {
+        _setupRealtimeUserDataListener();
       } else {
-        // User is signed in
-        fetchUserData();
+        _clearUserData();
+        _cancelUserDataSubscription();
       }
     });
   }
   
-  bool get isLoading => _isLoading;
-  String get username => _username;
-  String get email => _email;
-  String get userId => _userId;
-  UserDataModel? get userData => _userData;
-  bool get isAuthenticated => _auth.currentUser != null;
-  String get phoneNumber => _userData?.phoneNo ?? '';
-  String get location => _userData?.location ?? '';
-  String? get photoUrl => _userData?.photo != null && _userData!.photo!.containsKey('url') 
-      ? _userData!.photo!['url'] as String? 
-      : _auth.currentUser?.photoURL;
-
+  @override
+  void dispose() {
+    _cancelUserDataSubscription();
+    super.dispose();
+  }
+  
+  void _cancelUserDataSubscription() {
+    _userDataSubscription?.cancel();
+    _userDataSubscription = null;
+  }
+  
+  // Set up realtime listener for user data
+  void _setupRealtimeUserDataListener() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) return;
+    
+    setState(() => _isLoading = true);
+    
+    // Cancel any existing subscription
+    _cancelUserDataSubscription();
+    
+    // Set up new subscription
+    _userDataSubscription = _firestore
+      .collection('users')
+      .doc(userId)
+      .snapshots()
+      .listen(
+        (DocumentSnapshot snapshot) {
+          if (snapshot.exists) {
+            final data = snapshot.data() as Map<String, dynamic>;
+            _username = data['username'] ?? '';
+            _email = _auth.currentUser?.email ?? '';
+            _photoUrl = data['photoUrl'];
+            _userData = data;
+          } else {
+            // If user exists in Auth but not in Firestore, create the document
+            _createInitialUserDocument(userId);
+          }
+          
+          setState(() => _isLoading = false);
+        },
+        onError: (error) {
+          if (kDebugMode) {
+            print('Error in user data stream: $error');
+          }
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      );
+  }
+  
+  // Helper method to create initial user document
+  Future<void> _createInitialUserDocument(String userId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    
+    try {
+      await _firestore.collection('users').doc(userId).set({
+        'uid': userId,
+        'email': user.email,
+        'username': user.displayName ?? 'User',
+        'photoUrl': user.photoURL,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isOnline': true,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
+      
+      _username = user.displayName ?? 'User';
+      _email = user.email ?? '';
+      _photoUrl = user.photoURL;
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error creating initial user document: $e');
+      }
+    }
+  }
+  
+  void setState(Function() update) {
+    update();
+    notifyListeners();
+  }
+  
+  // Clear user data when logged out
   void _clearUserData() {
     _username = '';
     _email = '';
-    _userId = '';
-    _userData = null;
-  }
-  
-  Future<void> fetchUserData() async {
-    if (_auth.currentUser == null) {
-      _clearUserData();
-      notifyListeners();
-      return;
-    }
-    
-    _isLoading = true;
+    _photoUrl = null;
+    _userData = {};
+    _isLoading = false;
     notifyListeners();
-    
+  }
+
+  // Fetch user data from Firestore (manual fetch if needed)
+  Future<void> fetchUserData() async {
     try {
-      final user = _auth.currentUser!;
-      _userId = user.uid;
-      _email = user.email ?? '';
-      
-      // First try to set username from Firebase Auth display name
-      if (user.displayName != null && user.displayName!.isNotEmpty) {
-        _username = user.displayName!;
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) {
+        debugPrint('fetchUserData: No user logged in');
+        return;
       }
-      
-      // Then try to get additional user data from Firestore
-      final docSnapshot = await _firestore.collection('users').doc(user.uid).get();
-      
-      if (docSnapshot.exists) {
-        final data = docSnapshot.data() as Map<String, dynamic>;
-        _userData = UserDataModel.fromJson(data);
-        
-        // Use Firestore username if available
-        if (_userData!.username.isNotEmpty) {
-          _username = _userData!.username;
-        }
+
+      setState(() => _isLoading = true);
+
+      // Get user document
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+
+      if (userDoc.exists) {
+        final data = userDoc.data() as Map<String, dynamic>;
+        _username = data['username'] ?? '';
+        _email = _auth.currentUser?.email ?? '';
+        _photoUrl = data['photoUrl'];
+        _userData = data;
+        debugPrint('User data fetched successfully');
       } else {
-        // If no Firestore document exists yet but we have a signed-in user,
-        // create a basic user document
-        if (_username.isEmpty) {
-          _username = _email.split('@')[0]; // Use email prefix as default username
-        }
-        
-        final userData = {
-          'userId': _userId,
-          'username': _username,
-          'email': _email,
-          'gmailid': _email, // Add required fields for UserDataModel
-          'phoneNo': '',
-          'Location': '',
-          'password': '',
-          'createdAt': FieldValue.serverTimestamp(),
-        };
-        
-        await _firestore.collection('users').doc(_userId).set(userData);
-        _userData = UserDataModel.fromJson(userData);
+        // If user exists in Auth but not in Firestore, create the document
+        debugPrint('Creating new user document in Firestore');
+        await _createInitialUserDocument(userId);
       }
+
+      // Set up real-time listener after initial data fetch
+      _setupRealtimeUserDataListener();
+
+      // Update online status
+      await _statusService.setUserOnline();
     } catch (e) {
       debugPrint('Error fetching user data: $e');
-      // If there's an error, use basic data from FirebaseAuth
-      _username = _auth.currentUser?.displayName ?? _email.split('@')[0];
+      // Don't rethrow - allow app to continue even with an error
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      setState(() => _isLoading = false);
     }
+  }
+
+  // Set user as offline
+  Future<void> setUserOffline() async {
+    await _statusService.setUserOffline();
   }
 
   // Method to check if the user's auth token is still valid
   Future<bool> validateAuthToken() async {
     if (_auth.currentUser == null) return false;
-    
+
     try {
       // Force token refresh to check validity
       await _auth.currentUser!.getIdToken(true);
@@ -124,12 +203,14 @@ class UserProvider with ChangeNotifier {
       return false;
     }
   }
-
-  // Method to update user profile
+  
+  // Update user profile
   Future<void> updateUserProfile({
     required String username,
     required String phoneNumber,
     required String location,
+    String bio = '',
+    String? photoUrl,
   }) async {
     if (_auth.currentUser == null) {
       throw Exception('User not authenticated');
@@ -139,31 +220,39 @@ class UserProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final userDoc = _firestore.collection('users').doc(_userId);
+      final userDoc = _firestore.collection('users').doc(_auth.currentUser!.uid);
 
-      // Update Firestore
-      await userDoc.update({
+      Map<String, dynamic> updateData = {
         'username': username,
         'phoneNo': phoneNumber,
         'Location': location,
-      });
+        'bio': bio,
+        'profileCompleted': true,
+      };
+      
+      // Add photoUrl if provided
+      if (photoUrl != null) {
+        updateData['photoUrl'] = photoUrl;
+        _photoUrl = photoUrl;
+      }
+
+      // Update Firestore
+      await userDoc.update(updateData);
 
       // Update local state
       _username = username;
-      if (_userData != null) {
-        _userData = _userData!.copyWith(
-          username: username,
-          phoneNo: phoneNumber,
-          location: location,
-        );
-      }
+      _userData['username'] = username;
+      _userData['phoneNo'] = phoneNumber;
+      _userData['Location'] = location;
+      _userData['bio'] = bio;
+      _userData['profileCompleted'] = true;
 
       // Optionally update Firebase Auth display name
       await _auth.currentUser!.updateDisplayName(username);
 
     } catch (e) {
       debugPrint('Error updating profile: $e');
-      throw e;
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();

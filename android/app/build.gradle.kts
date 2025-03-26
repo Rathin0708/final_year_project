@@ -9,7 +9,7 @@ plugins {
 dependencies {
     // Import the Firebase BoM
     implementation(platform("com.google.firebase:firebase-bom:33.11.0"))
-
+    implementation ("com.google.firebase:firebase-messaging")
     // TODO: Add the dependencies for Firebase products you want to use
     // When using the BoM, don't specify versions in Firebase dependencies
     implementation("com.google.firebase:firebase-analytics")
@@ -18,7 +18,7 @@ dependencies {
     // https://firebase.google.com/docs/android/setup#available-libraries
     
     // Enable desugaring for Java 8+ features used by flutter_local_notifications
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }
 
 android {
@@ -29,7 +29,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-        // Enable desugaring
         isCoreLibraryDesugaringEnabled = true
     }
 

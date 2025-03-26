@@ -1,10 +1,8 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/user_provider.dart';
-import 'Dashboard.dart';
-import 'login_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/app_colors.dart';
+import 'dashboard_screen.dart';
+import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -14,36 +12,38 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
   @override
   void initState() {
     super.initState();
-    _checkAuthStatus();
+    _navigateToNextScreen();
   }
 
-  Future<void> _checkAuthStatus() async {
-    // Delay for a moment to show splash screen
-    await Future.delayed(const Duration(seconds: 1));
-    
-    final user = FirebaseAuth.instance.currentUser;
-    
-    if (context.mounted) {
-      if (user != null) {
-        // User is logged in, fetch their data
-        final userProvider = Provider.of<UserProvider>(context, listen: false);
-        await userProvider.fetchUserData();
-        
-        if (context.mounted) {
+  Future<void> _navigateToNextScreen() async {
+    await Future.delayed(const Duration(seconds: 2));
+
+    try {
+      final currentUser = _auth.currentUser;
+
+      if (currentUser != null) {
+        if (mounted) {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const Dashboard()),
+            MaterialPageRoute(builder: (context) => const DashboardScreen()),
           );
         }
       } else {
-        // User is not logged in
-        if (context.mounted) {
+        if (mounted) {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const Login_screen()),
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
           );
         }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
       }
     }
   }
@@ -51,30 +51,28 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.primary,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primary,
-              ),
-              child: const Icon(
-                Icons.person,
-                size: 80,
-                color: AppColors.textLight,
+            const Icon(
+              Icons.person_pin,
+              size: 100,
+              color: Colors.white,
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Employee Management',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
-            const SizedBox(height: 20),
-            const Text(
-              'Welcome to User App',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
+            const SizedBox(height: 48),
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
             ),
           ],
         ),

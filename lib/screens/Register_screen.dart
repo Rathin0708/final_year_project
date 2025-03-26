@@ -1,12 +1,18 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import '../widgets/text_field_input.dart';
+import '../utils/app_typography.dart';
+import '../utils/app_colors.dart';
+import '../utils/app_dimensions.dart';
+import '../services/auth_service.dart';
+import 'dashboard_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
-import 'Dashboard.dart';
-import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -16,65 +22,67 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
-  
+  final AuthService _authService = AuthService();
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _nameController = TextEditingController();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
+
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
   
   bool _isLoading = false;
+  String _errorMessage = '';
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-  String _errorMessage = '';
 
   @override
   void dispose() {
-    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _usernameController.dispose();
+    _phoneController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 
-  // Email/Password Registration
-  Future<void> _registerWithEmailAndPassword() async {
+  Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
     
+    // Check if passwords match
+    if (_passwordController.text != _confirmPasswordController.text) {
+      setState(() {
+        _errorMessage = 'Passwords do not match.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
-    
+
     try {
-      // Create user in Firebase Auth
-      final userCredential = await _auth.createUserWithEmailAndPassword(
+      // Register with Firebase
+      final userCredential = await _authService.signUpWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
+        username: _usernameController.text.trim(),
+        phoneNumber: _phoneController.text.trim(),
+        location: _locationController.text.trim(),
       );
-      
-      // Update display name
-      await userCredential.user?.updateDisplayName(_nameController.text.trim());
-      
-      // Create user document in Firestore
-      await _createUserInFirestore(
-        userCredential.user!.uid,
-        _nameController.text.trim(),
-        _emailController.text.trim(),
-      );
-      
-      if (mounted) {
-        // Update user provider
+
+      if (userCredential != null && mounted) {
+        // Update user provider with new user data
         await Provider.of<UserProvider>(context, listen: false).fetchUserData();
         
-        // Navigate to home
-        Navigator.pushAndRemoveUntil(
+        // Navigate to dashboard
+        Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const Dashboard()),
-          (route) => false,
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -83,7 +91,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
     } catch (e) {
       setState(() {
-        _errorMessage = 'An unexpected error occurred. Please try again.';
+        _errorMessage = 'Registration failed: ${e.toString()}';
       });
     } finally {
       if (mounted) {
@@ -94,17 +102,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  String _getFirebaseErrorMessage(String code) {
+    switch (code) {
+      case 'email-already-in-use':
+        return 'This email is already registered.';
+      case 'invalid-email':
+        return 'Please provide a valid email address.';
+      case 'weak-password':
+        return 'Password is too weak. Please choose a stronger password.';
+      case 'operation-not-allowed':
+        return 'Email/Password accounts are not enabled.';
+      default:
+        return 'Registration failed. Please try again.';
+    }
+  }
+
   // Google Sign-up
   Future<void> _signUpWithGoogle() async {
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
-    
+
     try {
       // Start Google sign-in flow
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      
+
       if (googleUser == null) {
         // User canceled
         setState(() {
@@ -112,41 +135,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
         return;
       }
-      
+
       // Get authentication details
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      
+
       // Create credential
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
-      
-      // Sign in/up with Firebase
-      final userCredential = await _auth.signInWithCredential(credential);
-      
-      // Check if this is a new user
-      final isNewUser = userCredential.additionalUserInfo?.isNewUser ?? false;
-      
-      if (isNewUser) {
-        // Create user in Firestore
-        await _createUserInFirestore(
-          userCredential.user!.uid,
-          userCredential.user!.displayName ?? googleUser.displayName ?? '',
-          userCredential.user!.email ?? googleUser.email,
-        );
-      }
-      
-      if (mounted) {
-        await Provider.of<UserProvider>(context, listen: false).fetchUserData();
-        
+
+      // Sign in/up with Firebase using AuthService
+      final userCredential = await _authService.signInWithCredential(credential);
+
+      // User creation is handled by the AuthService
+
+      // Check that we're still logged in
+      if (FirebaseAuth.instance.currentUser != null && mounted) {
+        // Use direct navigation instead of named routes
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const Dashboard()),
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
           (route) => false,
         );
+      } else {
+        setState(() {
+          _errorMessage = 'Google sign-in was successful, but session failed to persist. Please try again.';
+          _isLoading = false;
+        });
       }
     } catch (e) {
+      if (kDebugMode) {
+        print("Google sign-up error: $e");
+      }
       setState(() {
         _errorMessage = 'Google sign-up failed. Please try again.';
       });
@@ -161,65 +182,61 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   // Apple Sign-up
   Future<void> _signUpWithApple() async {
+    if (!Platform.isIOS && !kIsWeb) {
+      setState(() {
+        _errorMessage = 'Apple Sign-in is only available on iOS and web platforms.';
+      });
+      return;
+    }
+    
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
     
     try {
-      // Request credentials
-      final appleCredential = await SignInWithApple.getAppleIDCredential(
+      // Apple sign in process
+      final credential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
       );
       
-      // Create OAuthCredential
-      final oauthCredential = OAuthProvider('apple.com').credential(
-        idToken: appleCredential.identityToken,
-        accessToken: appleCredential.authorizationCode,
+      // Create OAuthCredential for Firebase
+      final oauthCredential = OAuthProvider("apple.com").credential(
+        idToken: credential.identityToken,
+        accessToken: credential.authorizationCode,
       );
+
+      // Sign in to Firebase using AuthService
+      final userCredential = await _authService.signInWithCredential(oauthCredential);
       
-      // Sign in/up with Firebase
-      final userCredential = await _auth.signInWithCredential(oauthCredential);
-      
-      // Check if new user
-      final isNewUser = userCredential.additionalUserInfo?.isNewUser ?? false;
-      
-      if (isNewUser) {
-        // Get name from Apple credentials or create placeholder
-        String displayName = 'Apple User'; // Default
-        
-        if (appleCredential.givenName != null || appleCredential.familyName != null) {
-          displayName = [appleCredential.givenName, appleCredential.familyName]
-              .where((name) => name != null)
-              .join(' ');
+      // User creation is handled by the AuthService
+
+      // Check that we're still logged in
+      if (FirebaseAuth.instance.currentUser != null && mounted) {
+        try {
+          // Add a short delay to ensure Firebase completes its internal processes
+          await Future.delayed(const Duration(milliseconds: 500));
+          // await Provider.of<UserProvider>(context, listen: false).fetchUserData();
+        } catch (e) {
+          print("Provider update error (non-fatal): $e");
+          // Continue anyway
         }
-        
-        // Update user display name if needed
-        if (userCredential.user!.displayName == null) {
-          await userCredential.user!.updateDisplayName(displayName);
-        }
-        
-        // Create user in Firestore
-        await _createUserInFirestore(
-          userCredential.user!.uid,
-          displayName,
-          userCredential.user!.email ?? '',
-        );
-      }
-      
-      if (mounted) {
-        await Provider.of<UserProvider>(context, listen: false).fetchUserData();
         
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const Dashboard()),
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
           (route) => false,
         );
+      } else {
+        setState(() {
+          _errorMessage = 'Apple sign-in was successful, but session failed to persist. Please try again.';
+        });
       }
     } catch (e) {
+      print("Apple sign-up error: $e");
       setState(() {
         _errorMessage = 'Apple sign-up failed. Please try again.';
       });
@@ -229,32 +246,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           _isLoading = false;
         });
       }
-    }
-  }
-
-  Future<void> _createUserInFirestore(String userId, String displayName, String email) async {
-    final userData = {
-      'userId': userId,
-      'username': displayName,
-      'email': email,
-      'createdAt': FieldValue.serverTimestamp(),
-    };
-    
-    await _firestore.collection('users').doc(userId).set(userData);
-  }
-
-  String _getFirebaseErrorMessage(String code) {
-    switch (code) {
-      case 'weak-password':
-        return 'The password provided is too weak.';
-      case 'email-already-verified':
-        return 'The email address is already verified.';
-      case 'invalid-email':
-        return 'The email address is invalid.';
-      case 'email-already-in-use':
-        return 'The account already exists for that email.';
-      default:
-        return 'An unexpected error occurred. Please try again.';
     }
   }
 
@@ -316,25 +307,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ),
         
-                  // Name field
-                  TextFormField(
-                    controller: _nameController,
-                    decoration: InputDecoration(
-                      labelText: 'Name',
-                      prefixIcon: const Icon(Icons.person_outline),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your name';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-        
                   // Email field
                   TextFormField(
                     controller: _emailController,
@@ -351,6 +323,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       }
                       if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
                         return 'Please enter a valid email';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+        
+                  // Username field
+                  TextFormField(
+                    controller: _usernameController,
+                    decoration: InputDecoration(
+                      labelText: 'Username',
+                      prefixIcon: const Icon(Icons.person_outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your username';
+                      }
+                      if (value.length < 3) {
+                        return 'Username must be at least 3 characters';
+                      }
+                      if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
+                        return 'Username can only contain letters, numbers, and underscores';
                       }
                       return null;
                     },
@@ -413,7 +410,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Please enter your confirm password';
+                        return 'Please enter your password';
                       }
                       if (value != _passwordController.text) {
                         return 'Password and confirm password do not match';
@@ -425,7 +422,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         
                   // Register button
                   ElevatedButton(
-                    onPressed: _isLoading ? null : _registerWithEmailAndPassword,
+                    onPressed: _isLoading ? null : _register,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
@@ -462,46 +459,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 14),
         
                   // Social login buttons
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Column(
                     children: [
-                      // Google sign-in
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isLoading ? null : _signUpWithGoogle,
-                          icon: Image.asset(
-                            'assets/images/google_logo.png', // Make sure to add this to your assets
-                            height: 24,
-                          ),
-                          label: const Text('Google'),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.black87,
-                            backgroundColor: Colors.white,
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              side: BorderSide(color: Colors.grey[300]!),
+                      const Text('Or sign up with'),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Google sign-in
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _isLoading ? null : _signUpWithGoogle,
+                              icon: _isLoading 
+                                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : Image.asset(
+                                      'assets/images/google_logo.png',
+                                      height: 24,
+                                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.g_mobiledata, size: 24),
+                                    ),
+                              label: const Text('Google'),
+                              style: ElevatedButton.styleFrom(
+                                foregroundColor: Colors.black87,
+                                backgroundColor: Colors.white,
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(color: Colors.grey[300]!),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 15),
-        
-                      // Apple sign-in (iOS only)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isLoading ? null : _signUpWithApple,
-                          icon: const Icon(Icons.apple, color: Colors.white),
-                          label: const Text('Apple'),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.black,
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                          const SizedBox(width: 15),
+          
+                          // Apple sign-in (conditionally displayed)
+                          if (Platform.isIOS || kIsWeb)
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _isLoading ? null : _signUpWithApple,
+                                icon: _isLoading 
+                                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : const Icon(Icons.apple, color: Colors.white),
+                                label: const Text('Apple'),
+                                style: ElevatedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  backgroundColor: Colors.black,
+                                  elevation: 2,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                        ],
                       ),
                     ],
                   ),
@@ -517,10 +526,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       TextButton(
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const Login_screen()),
-                          );
+                          Navigator.pop(context); // Go back to login screen
                         },
                         child: const Text('Login'),
                       ),

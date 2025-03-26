@@ -1,40 +1,39 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../Widgets/text_field_input.dart';
+import '../widgets/text_field_input.dart';
 import '../utils/app_dimensions.dart';
 import '../utils/app_typography.dart';
-import 'Dashboard.dart';
-import 'Register_screen.dart';
+import 'dashboard_screen.dart';
+import 'register_screen.dart';
 import '../services/auth_service.dart';
 import '../utils/app_colors.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
-import 'forgot_password-screen.dart';
+import 'forgot_password_screen.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
-class Login_screen extends StatefulWidget {
-  const Login_screen({super.key});
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
 
   @override
-  State<Login_screen> createState() => _Login_screenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _Login_screenState extends State<Login_screen> {
+class _LoginScreenState extends State<LoginScreen> {
   final emailController = TextEditingController();
   final passController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final AuthService _authService = AuthService();
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   bool _isLoading = false;
-  bool _obscurePassword = true;
   String _errorMessage = '';
 
   @override
   void dispose() {
-    super.dispose();
     emailController.dispose();
     passController.dispose();
+    super.dispose();
   }
 
   // Email/Password Login
@@ -47,30 +46,33 @@ class _Login_screenState extends State<Login_screen> {
     });
     
     try {
+      // Call the sign in method from auth service
       final userCredential = await _authService.signInWithEmailAndPassword(
-        email: emailController.text,
+        email: emailController.text.trim(),
         password: passController.text,
       );
       
-      if (userCredential.user != null) {
-        if (context.mounted) {
-          // Update user provider with new user data
-          await Provider.of<UserProvider>(context, listen: false).fetchUserData();
-          
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const Dashboard()),
-          );
-        }
+      // Check if we got a valid user
+      if (userCredential.user != null && mounted) {
+        // Update user provider with new user data
+        await Provider.of<UserProvider>(context, listen: false).fetchUserData();
+        
+        // Navigate to dashboard
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
+        );
       }
     } on FirebaseAuthException catch (e) {
       setState(() {
         _errorMessage = _getFirebaseErrorMessage(e.code);
       });
+      debugPrint('Firebase Auth Error: ${e.code} - ${e.message}');
     } catch (e) {
       setState(() {
         _errorMessage = 'An unexpected error occurred. Please try again.';
       });
+      debugPrint('Login Error: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -111,16 +113,14 @@ class _Login_screenState extends State<Login_screen> {
       // Sign in with Firebase
       final userCredential = await _authService.signInWithCredential(credential);
       
-      if (userCredential.user != null) {
-        if (context.mounted) {
-          // Update user provider after successful login
-          await Provider.of<UserProvider>(context, listen: false).fetchUserData();
-          
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const Dashboard()),
-          );
-        }
+      if (userCredential.user != null && mounted) {
+        // Update user provider after successful login
+        await Provider.of<UserProvider>(context, listen: false).fetchUserData();
+        
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
+        );
       }
     } catch (e) {
       setState(() {
@@ -166,17 +166,17 @@ class _Login_screenState extends State<Login_screen> {
             (appleCredential.givenName != null || appleCredential.familyName != null)) {
           await userCredential.user!.updateDisplayName(
             [appleCredential.givenName, appleCredential.familyName]
-                .where((name) => name != null)
+                .whereType<String>()
                 .join(' ')
           );
         }
         
-        if (context.mounted) {
+        if (mounted) {
           await Provider.of<UserProvider>(context, listen: false).fetchUserData();
           
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const Dashboard()),
+            MaterialPageRoute(builder: (context) => const DashboardScreen()),
           );
         }
       }
@@ -268,18 +268,24 @@ class _Login_screenState extends State<Login_screen> {
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        minimumSize: const Size(double.infinity, 48),
                       ),
                       onPressed: _isLoading ? null : _signInWithEmailAndPassword,
                       child: _isLoading 
-                        ? SizedBox(
+                        ? const SizedBox(
                             width: 20, 
                             height: 20, 
                             child: CircularProgressIndicator(
-                              color: AppColors.primary,
+                              color: Colors.white,
                               strokeWidth: 2,
                             )
                           )
-                        : Text('Login', style: TextStyle(fontSize: 16, color: AppColors.primary)),
+                        : const Text('Login', style: TextStyle(fontSize: 16, color: Colors.white)),
                     ),
                     TextButton(
                       onPressed: () {
